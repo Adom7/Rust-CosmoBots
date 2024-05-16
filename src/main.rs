@@ -1,149 +1,187 @@
-use bevy::prelude::*;
-// use bevy::input::mouse::{MouseButtonInput, MouseMotion, MouseWheel};
-// use bevy::render::camera;
-use std::collections::HashMap;
-use rand::Rng;
+use ggez::{event, graphics, Context, GameResult};
+use rand::{Rng, SeedableRng};
+use rand_pcg::Pcg32;
 
-
-fn main() {
-    App::new()
-    .add_plugins(DefaultPlugins)
-    .insert_resource(RobotMap::default())
-    // .add_systems(Startup ,add_map_elements)
-    .add_systems(Startup, setup)
-    .add_systems(Startup, add_robots)
-    .add_systems(Update , roaming_movement_system)
-    .insert_resource(ClearColor(Color::rgb(0.95, 0.62, 0.)))
-    .run();
- }
-
-
- #[derive(Default , Resource)]
-pub struct RobotMap {
-    pub robots: HashMap<RobotType, Vec<Entity>>,
+enum RobotType {
+    Explorer,
+    Collector,
+    Analyzer,
 }
 
-
-#[derive(Component)]
-pub struct RobotBundle {
-    pub robot : Robot,
-    pub transform: Transform,
+struct Robot {
+    robot_type: RobotType,
+    position: (usize, usize),
+    // Autres champs selon les besoins
 }
 
-#[derive(Debug, PartialEq, Eq, Hash)]
-pub enum RobotType {
-    Soil,
-    Water,
-    Rock
+struct Station {
+    robots: Vec<Robot>,
+    data: Vec<ScientificData>,
+    // Autres champs selon les besoins
 }
 
-#[derive(Component)]
-pub struct Robot {
-    pub name : String,
-    pub durability : i32,
-    pub autonomy : i32,
-    pub speciality : RobotType,
-    pub space : i32,
-} 
-
-fn setup(mut commands: Commands) {
-    commands.spawn(Camera2dBundle::default());
+struct ScientificData {
+    chemical_composition: String,
+    // Ajoutez d'autres champs au besoin
 }
 
-fn create_robot(commands: &mut Commands, robot_type: RobotType) -> Entity {
-    let color = match robot_type {
-        RobotType::Soil => Color::rgb(0.3, 0.4, 0.6),
-        RobotType::Water => Color::rgb(0.0, 0.0, 1.0),
-        RobotType::Rock => Color::rgb(0.5, 0.5, 0.5),
-    };
-
-    let name = match robot_type {
-        RobotType::Soil => "Soil Robot",
-        RobotType::Water => "Water Robot",
-        RobotType::Rock => "Rock Robot",
-    }.to_string();
-
-    let spawn_point = match robot_type {
-        RobotType::Soil => Transform::from_xyz(-10.0, 0.0, 0.0),
-        RobotType::Water =>  Transform::from_xyz(10.0, 0.0, 0.0),
-        RobotType::Rock =>  Transform::from_xyz(0.0, 0.0, 0.0),
-    };
-
-    commands.spawn(SpriteBundle {
-        sprite: Sprite {
-            color,
-            custom_size: Some(Vec2::new(10.0, 10.0)),
-            ..default()
-        },
-        transform : spawn_point,
-        ..default()
-    })
-    .insert(Robot {
-        name,
-        durability: 10,
-        autonomy: 100,
-        speciality: robot_type,
-        space: 100,
-    })
-    .insert(Movement::new(2.0))
-    .id()
-}
-
-fn add_robots(mut commands: Commands, mut robot_map: ResMut<RobotMap>) {
-    let soil_robot = create_robot(&mut commands, RobotType::Soil);
-    robot_map.robots.entry(RobotType::Soil).or_insert_with(Vec::new).push(soil_robot);
-
-    let water_robot = create_robot(&mut commands, RobotType::Water);
-    robot_map.robots.entry(RobotType::Water).or_insert_with(Vec::new).push(water_robot);
-
-    let rock_robot = create_robot(&mut commands, RobotType::Rock);
-    robot_map.robots.entry(RobotType::Rock).or_insert_with(Vec::new).push(rock_robot);
-
-}
-
-// fn add_map_elements(mut commands: Commands, asset_server: Res<AssetServer>) {
-//     let element_texture_handle = asset_server.load("textures/256_Grass 02 Blades.png");
-
-//     commands.spawn(SpriteBundle {
-//         texture: element_texture_handle,
-//         transform: Transform::from_xyz(0.0, 0.0, 0.0), 
-//         ..default()
-//     });
-// }
-
-#[derive(Component)]
-struct Movement {
-    direction: Vec3, // Direction actuelle du mouvement
-    timer: Timer,    // Timer pour changer de direction
-}
-
-impl Movement {
-    fn new(duration: f32) -> Self {
-        Movement {
-            direction: Vec3::ZERO,
-            timer: Timer::from_seconds(duration , TimerMode::Once),
+impl ScientificData {
+    fn new(chemical_composition: &str) -> Self {
+        ScientificData {
+            chemical_composition: String::from(chemical_composition),
         }
     }
 }
 
-fn roaming_movement_system(
-    time: Res<Time>,
-    mut query: Query<(&mut Movement, &mut Transform)>,
-) {
-    let mut rng = rand::thread_rng();
+struct Map {
+    obstacles: Vec<Vec<bool>>,
+    energy_spots: Vec<(usize, usize)>,
+    mineral_spots: Vec<(usize, usize)>,
+}
 
-    for (mut movement, mut transform) in query.iter_mut() {
-        // Mise à jour du timer
-        movement.timer.tick(time.delta());
-
-        if movement.timer.just_finished() {
-            // Choisir une nouvelle direction aléatoire
-            let dx = rng.gen_range(-1.0..1.0);
-            let dy = rng.gen_range(-1.0..1.0);
-            movement.direction = Vec3::new(dx, dy, 0.0).normalize() * 4.0; // Normaliser pour garder une vitesse constante
-        }
-
-        // Appliquer le mouvement
-        transform.translation += movement.direction * time.delta_seconds();
+impl Map {
+    fn generate(seed: u64, width: usize, height: usize) -> Map {
+        let mut rng = Pcg32::seed_from_u64(seed);
+        let obstacles: Vec<Vec<bool>> = (0..height)
+            .map(|_| (0..width).map(|_| rng.gen::<f32>() > 0.7).collect())
+            .collect();
+        Map { obstacles, energy_spots: Vec::new(), mineral_spots: Vec::new() }
     }
+
+    fn render(&self, ctx: &mut Context) -> GameResult<()> {
+        for (y, row) in self.obstacles.iter().enumerate() {
+            for (x, &obstacle) in row.iter().enumerate() {
+                if obstacle {
+                    let rect = graphics::Rect::new(
+                        (x * 20) as f32,
+                        (y * 20) as f32,
+                        20.0,
+                        20.0,
+                    );
+                    let obstacle_color = graphics::Color::from_rgb(100, 100, 100);
+                    let obstacle_mesh = graphics::Mesh::new_rectangle(
+                        ctx,
+                        graphics::DrawMode::fill(),
+                        rect,
+                        obstacle_color,
+                    )?;
+                    graphics::draw(ctx, &obstacle_mesh, graphics::DrawParam::default())?;
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+impl Robot {
+    fn new(robot_type: RobotType, position: (usize, usize)) -> Robot {
+        Robot { robot_type, position }
+    }
+
+    fn behave(&mut self, map: &Map, station: &mut Station) {
+        match self.robot_type {
+            RobotType::Explorer => self.explore(map),
+            RobotType::Collector => self.collect_resources(map, station),
+            RobotType::Analyzer => self.analyze(map, station),
+        }
+    }
+
+    fn explore(&mut self, map: &Map) {
+        let (x, y) = self.position;
+        
+        // Par exemple, déplacer le robot aléatoirement
+        let mut rng = rand::thread_rng();
+        let dx = rng.gen_range(-1..=1); // Déplacement horizontal aléatoire (-1, 0 ou 1)
+        let dy = rng.gen_range(-1..=1); // Déplacement vertical aléatoire (-1, 0 ou 1)
+        
+        let new_x = (x as isize + dx) as usize;
+        let new_y = (y as isize + dy) as usize;
+        
+        // Vérifier si le nouveau déplacement est valide (pas en dehors de la carte ou sur un obstacle)
+        if new_x < map.obstacles[0].len() && new_y < map.obstacles.len() && !map.obstacles[new_y][new_x] {
+            self.position = (new_x, new_y);
+        }
+    }
+
+    fn collect_resources(&mut self, map: &Map, station: &mut Station) {
+        // Logique pour collecter des ressources sur la carte et les ramener à la station
+    }
+
+    fn analyze(&mut self, map: &Map, station: &mut Station) {
+        // Logique pour analyser les échantillons collectés et transmettre les données à la station
+    }
+}
+
+impl Station {
+    fn process_data(&mut self) {
+        // Logique pour traiter les données scientifiques collectées par les robots
+    }
+
+    fn create_robot(&mut self) {
+        // Logique pour décider du type de robot à créer en fonction des besoins de la mission
+    }
+}
+
+struct GameState {
+    map: Map,
+    robots: Vec<Robot>,
+    station: Station,
+}
+
+impl GameState {
+    fn new(_ctx: &mut Context) -> GameResult<GameState> {
+        let map = Map::generate(1234, 20, 15);
+        let robots = vec![Robot::new(RobotType::Explorer, (5, 5)), Robot::new(RobotType::Collector, (10, 10))];
+        let station = Station { robots: Vec::new(), data: Vec::new() };
+        Ok(GameState { map, robots, station })
+    }
+}
+
+impl event::EventHandler for GameState {
+    fn update(&mut self, _ctx: &mut Context) -> GameResult<()> {
+        // Mettre à jour les robots
+        for robot in &mut self.robots {
+            robot.behave(&self.map, &mut self.station);
+        }
+        
+        // Traiter les données à la station
+        self.station.process_data();
+        
+        // Créer de nouveaux robots si nécessaire
+        self.station.create_robot();
+
+        Ok(())
+    }
+
+    fn draw(&mut self, ctx: &mut Context) -> GameResult<()> {
+        graphics::clear(ctx, graphics::WHITE);
+        self.map.render(ctx)?;
+    // Dessiner les robots
+    for robot in &self.robots {
+        let (x, y) = robot.position;
+        let rect = graphics::Rect::new((x * 20) as f32, (y * 20) as f32, 20.0, 20.0);
+        let robot_color = match robot.robot_type {
+            RobotType::Explorer => graphics::Color::from_rgb(255, 0, 0),
+            RobotType::Collector => graphics::Color::from_rgb(0, 255, 0),
+            RobotType::Analyzer => graphics::Color::from_rgb(0, 0, 255),
+        };
+        let robot_mesh = graphics::Mesh::new_rectangle(ctx, graphics::DrawMode::fill(), rect, robot_color)?;
+        graphics::draw(ctx, &robot_mesh, graphics::DrawParam::default())?;
+    }
+
+    // Dessiner la station
+    let station_rect = graphics::Rect::new(100.0, 100.0, 50.0, 50.0); // Position et taille de la station
+    let station_color = graphics::Color::from_rgb(255, 255, 0); // Couleur jaune pour la station
+    let station_mesh = graphics::Mesh::new_rectangle(ctx, graphics::DrawMode::fill(), station_rect, station_color)?;
+    graphics::draw(ctx, &station_mesh, graphics::DrawParam::default())?;
+        graphics::present(ctx)?;
+        Ok(())
+    }
+}
+
+fn main() -> GameResult {
+    let cb = ggez::ContextBuilder::new("exploration_spatiale", "votre_nom");
+    let (ctx, event_loop) = &mut cb.build()?;
+    let game = &mut GameState::new(ctx)?;
+    event::run(ctx, event_loop, game)
 }
