@@ -17,6 +17,8 @@ struct Robot {
 struct Station {
     robots: Vec<Robot>,
     data: Vec<ScientificData>,
+    energy: usize, // Champ energy ajouté
+    minerals: usize, // Champ minerals ajouté
     // Autres champs selon les besoins
 }
 
@@ -78,7 +80,7 @@ impl Robot {
         Robot { robot_type, position }
     }
 
-    fn behave(&mut self, map: &Map, station: &mut Station) {
+    fn behave(&mut self, map: &mut Map, station: &mut Station) {
         match self.robot_type {
             RobotType::Explorer => self.explore(map),
             RobotType::Collector => self.collect_resources(map, station),
@@ -103,9 +105,28 @@ impl Robot {
         }
     }
 
-    fn collect_resources(&mut self, map: &Map, station: &mut Station) {
-        // Logique pour collecter des ressources sur la carte et les ramener à la station
+    fn collect_resources(&mut self, map: &mut Map, station: &mut Station) {
+        let (x, y) = self.position;
+        
+        // Exemple: collecter des ressources d'énergie
+        if let Some(energy_index) = map.energy_spots.iter().position(|&(ex, ey)| ex == x && ey == y) {
+            // Supprimer la ressource d'énergie de la carte
+            map.energy_spots.remove(energy_index);
+            
+            // Ajouter de l'énergie à la station
+            station.energy += 1; // Exemple: ajouter 1 unité d'énergie
+        }
+        
+        // Exemple: collecter des minerais
+        if let Some(mineral_index) = map.mineral_spots.iter().position(|&(mx, my)| mx == x && my == y) {
+            // Supprimer le minerai de la carte
+            map.mineral_spots.remove(mineral_index);
+            
+            // Ajouter des minerais à la station
+            station.minerals += 1; // Exemple: ajouter 1 unité de minerai
+        }
     }
+    
 
     fn analyze(&mut self, map: &Map, station: &mut Station) {
         // Logique pour analyser les échantillons collectés et transmettre les données à la station
@@ -132,16 +153,15 @@ impl GameState {
     fn new(_ctx: &mut Context) -> GameResult<GameState> {
         let map = Map::generate(1234, 20, 15);
         let robots = vec![Robot::new(RobotType::Explorer, (5, 5)), Robot::new(RobotType::Collector, (10, 10))];
-        let station = Station { robots: Vec::new(), data: Vec::new() };
+        let station = Station { robots: Vec::new(), data: Vec::new(), energy: 0, minerals: 0 };
         Ok(GameState { map, robots, station })
     }
 }
-
 impl event::EventHandler for GameState {
     fn update(&mut self, _ctx: &mut Context) -> GameResult<()> {
         // Mettre à jour les robots
         for robot in &mut self.robots {
-            robot.behave(&self.map, &mut self.station);
+            robot.behave(&mut self.map, &mut self.station);
         }
         
         // Traiter les données à la station
@@ -149,35 +169,39 @@ impl event::EventHandler for GameState {
         
         // Créer de nouveaux robots si nécessaire
         self.station.create_robot();
-
+    
         Ok(())
     }
 
     fn draw(&mut self, ctx: &mut Context) -> GameResult<()> {
+        // Dessiner la carte et les obstacles
         graphics::clear(ctx, graphics::WHITE);
         self.map.render(ctx)?;
-    // Dessiner les robots
-    for robot in &self.robots {
-        let (x, y) = robot.position;
-        let rect = graphics::Rect::new((x * 20) as f32, (y * 20) as f32, 20.0, 20.0);
-        let robot_color = match robot.robot_type {
-            RobotType::Explorer => graphics::Color::from_rgb(255, 0, 0),
-            RobotType::Collector => graphics::Color::from_rgb(0, 255, 0),
-            RobotType::Analyzer => graphics::Color::from_rgb(0, 0, 255),
-        };
-        let robot_mesh = graphics::Mesh::new_rectangle(ctx, graphics::DrawMode::fill(), rect, robot_color)?;
-        graphics::draw(ctx, &robot_mesh, graphics::DrawParam::default())?;
-    }
 
-    // Dessiner la station
-    let station_rect = graphics::Rect::new(100.0, 100.0, 50.0, 50.0); // Position et taille de la station
-    let station_color = graphics::Color::from_rgb(255, 255, 0); // Couleur jaune pour la station
-    let station_mesh = graphics::Mesh::new_rectangle(ctx, graphics::DrawMode::fill(), station_rect, station_color)?;
-    graphics::draw(ctx, &station_mesh, graphics::DrawParam::default())?;
+        // Dessiner les robots
+        for robot in &self.robots {
+            let (x, y) = robot.position;
+            let rect = graphics::Rect::new((x * 20) as f32, (y * 20) as f32, 20.0, 20.0);
+            let robot_color = match robot.robot_type {
+                RobotType::Explorer => graphics::Color::from_rgb(255, 0, 0),
+                RobotType::Collector => graphics::Color::from_rgb(0, 255, 0),
+                RobotType::Analyzer => graphics::Color::from_rgb(0, 0, 255),
+            };
+            let robot_mesh = graphics::Mesh::new_rectangle(ctx, graphics::DrawMode::fill(), rect, robot_color)?;
+            graphics::draw(ctx, &robot_mesh, graphics::DrawParam::default())?;
+        }
+
+        // Dessiner la station
+        let station_rect = graphics::Rect::new(100.0, 100.0, 50.0, 50.0); // Position et taille de la station
+        let station_color = graphics::Color::from_rgb(255, 255, 0); // Couleur jaune pour la station
+        let station_mesh = graphics::Mesh::new_rectangle(ctx, graphics::DrawMode::fill(), station_rect, station_color)?;
+        graphics::draw(ctx, &station_mesh, graphics::DrawParam::default())?;
         graphics::present(ctx)?;
+
         Ok(())
     }
 }
+
 
 fn main() -> GameResult {
     let cb = ggez::ContextBuilder::new("exploration_spatiale", "votre_nom");
