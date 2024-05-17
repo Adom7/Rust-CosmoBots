@@ -5,7 +5,11 @@ use rand_pcg::Pcg32;
 enum RobotType {
     Explorer,
 }
-
+struct ExtractorRobot {
+    position: (usize, usize),
+    target_energy: Option<(usize, usize)>,
+    has_collected: bool,
+}
 struct Robot {
     position: (usize, usize),
     discovered_energy_spots: Vec<(usize, usize)>,
@@ -23,6 +27,33 @@ struct Map {
 
 }
 
+impl ExtractorRobot {
+    fn new(position: (usize, usize)) -> ExtractorRobot {
+        ExtractorRobot {
+            position,
+            target_energy: None,
+            has_collected: false,
+        }
+    }
+
+    fn move_towards_target(&mut self, target: (usize, usize)) {
+        let (tx, ty) = target;
+        let (rx, ry) = self.position;
+
+        let dx = (tx as isize - rx as isize).signum();
+        let dy = (ty as isize - ry as isize).signum();
+
+        self.position = ((rx as isize + dx) as usize, (ry as isize + dy) as usize);
+
+        if self.position == target {
+            self.has_collected = true;
+        }
+    }
+
+    fn return_to_station(&mut self, station_position: &(usize, usize)) {
+        self.move_towards_target(*station_position);
+    }
+}
 impl Map {
     fn generate(seed: u64, width: usize, height: usize) -> Map {
         let mut rng = Pcg32::seed_from_u64(seed);
@@ -133,6 +164,8 @@ struct GameState {
     map: Map,
     robot: Robot,
     station: Station,
+    extractors: Vec<ExtractorRobot>,
+
 }
 
 impl GameState {
@@ -140,7 +173,34 @@ impl GameState {
         let map = Map::generate(1234, 20, 15);
         let robot = Robot::new((5, 5));
         let station = Station { position: (10, 10) };
-        Ok(GameState { map, robot, station })
+        let extractors = Vec::new();  // Initialisation de extractors comme un vecteur vide
+        Ok(GameState { map, robot, station, extractors })
+    }
+    fn deploy_extractors(&mut self) {
+        for energy_spot in self.map.energy_spots.clone() {
+            let mut extractor = ExtractorRobot::new(self.station.position);
+            extractor.target_energy = Some(energy_spot);
+            self.extractors.push(extractor);
+        }
+    }
+
+    fn update_extractors(&mut self) {
+        for extractor in self.extractors.iter_mut() {
+            if let Some(target) = extractor.target_energy {
+                if !extractor.has_collected {
+                    extractor.move_towards_target(target);
+                } else {
+                    extractor.return_to_station(&self.station.position);
+                    // Remove the energy spot from the map when collected
+                    self.map.energy_spots.retain(|&e| e != target);
+                }
+            } else {
+                // Assign a target energy spot if the extractor doesn't have one
+                if let Some(energy_spot) = self.map.energy_spots.pop() {
+                    extractor.target_energy = Some(energy_spot);
+                }
+            }
+        }
     }
 }
 
@@ -159,6 +219,11 @@ impl event::EventHandler for GameState {
             self.robot.return_to_station(&self.station.position);
         } else {
             println!("Robot has returned to the station.");
+            if self.extractors.is_empty() {
+                self.deploy_extractors();
+            } else {
+                self.update_extractors();
+            }
         }
         Ok(())
     }
@@ -180,7 +245,14 @@ impl event::EventHandler for GameState {
         let station_color = graphics::Color::from_rgb(255, 255, 0); // Jaune pour la station
         let station_mesh = graphics::Mesh::new_rectangle(ctx, graphics::DrawMode::fill(), station_rect, station_color)?;
         graphics::draw(ctx, &station_mesh, graphics::DrawParam::default())?;
-
+                // Dessiner les robots ici...
+        for extractor in &self.extractors {
+            let (x, y) = extractor.position;
+            let rect = graphics::Rect::new((x * 20) as f32, (y * 20) as f32, 20.0, 20.0);
+            let color = graphics::Color::from_rgb(0, 0, 255); // Bleu pour les extracteurs
+            let mesh = graphics::Mesh::new_rectangle(ctx, graphics::DrawMode::fill(), rect, color)?;
+            graphics::draw(ctx, &mesh, graphics::DrawParam::default())?;
+        }
         graphics::present(ctx)?;
         Ok(())
     }
