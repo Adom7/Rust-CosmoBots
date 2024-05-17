@@ -8,8 +8,9 @@ enum RobotType {
 
 struct Robot {
     position: (usize, usize),
+    discovered_energy_spots: Vec<(usize, usize)>,
+    done_exploring: bool,
 }
-
 struct Station {
     position: (usize, usize),
 }
@@ -40,7 +41,7 @@ impl Map {
         // Dessiner les obstacles et autres éléments seulement si le brouillard est dissipé
         for (y, row) in self.obstacles.iter().enumerate() {
             for (x, &obstacle) in row.iter().enumerate() {
-                if !self.fog_of_war[y][x] {
+                if !self.fog_of_war[y][x] { // L'obstacle est dessiné seulement si le brouillard est dissipé
                     if obstacle {
                         let rect = graphics::Rect::new(
                             (x * 20) as f32, (y * 20) as f32, 20.0, 20.0,
@@ -71,16 +72,41 @@ impl Map {
     
         Ok(())
     }
+    fn explored_percentage(&self) -> f32 {
+        let total_cells = self.fog_of_war.len() * self.fog_of_war[0].len();
+        let explored_cells = self.fog_of_war.iter().flatten().filter(|&&cell| !cell).count();
+        explored_cells as f32 / total_cells as f32 * 100.0
+    }
+
     
     
 }
 
 impl Robot {
+    fn return_to_station(&mut self, station_position: &(usize, usize)) {
+        if self.position != *station_position {
+            let (sx, sy) = *station_position;
+            let (rx, ry) = self.position;
+
+            let dx = (sx as isize - rx as isize).signum();
+            let dy = (sy as isize - ry as isize).signum();
+
+            self.position = ((rx as isize + dx) as usize, (ry as isize + dy) as usize);
+        }
+    }
     fn new(position: (usize, usize)) -> Robot {
-        Robot { position }
+        Robot {
+            position,
+            discovered_energy_spots: Vec::new(),
+            done_exploring: false,
+        }
     }
 
     fn explore(&mut self, map: &mut Map) {
+        if self.done_exploring {
+            return; // S'arrêter si l'exploration est terminée.
+        }
+        
         let (x, y) = self.position;
         let mut rng = rand::thread_rng();
         let dx = rng.gen_range(-1..=1);
@@ -120,8 +146,20 @@ impl GameState {
 
 impl event::EventHandler for GameState {
     fn update(&mut self, _ctx: &mut Context) -> GameResult<()> {
-        // Mettre à jour le robot en passant une référence mutable à la carte
-        self.robot.explore(&mut self.map);  // Notez &mut pour passer une référence mutable
+        let explored_percent = self.map.explored_percentage();
+        println!("Map explored: {:.2}%", explored_percent); // Afficher le pourcentage exploré
+
+        if !self.robot.done_exploring {
+            self.robot.explore(&mut self.map);
+            if explored_percent >= 100.0 { // Si toute la map est explorée
+                self.robot.done_exploring = true;
+            }
+        } else if self.robot.position != self.station.position {
+            // Diriger le robot vers la station si ce n'est pas déjà fait
+            self.robot.return_to_station(&self.station.position);
+        } else {
+            println!("Robot has returned to the station.");
+        }
         Ok(())
     }
 
